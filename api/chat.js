@@ -1,5 +1,6 @@
 // ========================================
-// Vercel Serverless Function — Gemini Proxy
+// Vercel Serverless Function — NVIDIA Llama Proxy
+// Model: meta/llama-3.3-70b-instruct
 // Keeps API key secret (never exposed to browser)
 // ========================================
 
@@ -45,9 +46,9 @@ export default async function handler(request) {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers });
+    return new Response(JSON.stringify({ error: 'NVIDIA API key not configured' }), { status: 500, headers });
   }
 
   let body;
@@ -62,44 +63,37 @@ export default async function handler(request) {
     return new Response(JSON.stringify({ error: 'Invalid messages format' }), { status: 400, headers });
   }
 
-  // Build Gemini request
-  const geminiPayload = {
-    system_instruction: {
-      parts: [{ text: SYSTEM_PROMPT }],
-    },
-    contents: messages.map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    })),
-    generationConfig: {
-      temperature: 0.7,
-      topP: 0.95,
-      maxOutputTokens: 1024,
-    },
-    safetySettings: [
-      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+  // Build NVIDIA / OpenAI-compatible request
+  const nvidiaPayload = {
+    model: 'meta/llama-3.3-70b-instruct',
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
     ],
+    temperature: 0.7,
+    top_p: 0.95,
+    max_tokens: 1024,
+    stream: false,
   };
 
   try {
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(geminiPayload),
-      }
-    );
+    const nvidiaRes = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(nvidiaPayload),
+    });
 
-    if (!geminiRes.ok) {
-      const err = await geminiRes.text();
-      console.error('Gemini API error:', err);
-      return new Response(JSON.stringify({ error: 'Gemini API error', detail: err }), { status: 502, headers });
+    if (!nvidiaRes.ok) {
+      const err = await nvidiaRes.text();
+      console.error('NVIDIA API error:', err);
+      return new Response(JSON.stringify({ error: 'NVIDIA API error', detail: err }), { status: 502, headers });
     }
 
-    const data = await geminiRes.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || 'ขออภัยครับ ไม่สามารถตอบได้ในขณะนี้';
+    const data = await nvidiaRes.json();
+    const text = data?.choices?.[0]?.message?.content || 'ขออภัยครับ ไม่สามารถตอบได้ในขณะนี้';
 
     return new Response(JSON.stringify({ reply: text }), { status: 200, headers });
   } catch (err) {

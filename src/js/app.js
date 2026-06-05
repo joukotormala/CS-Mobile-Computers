@@ -218,6 +218,7 @@ function renderNav() {
           <li><button class="nav-link ${currentCategory === 'mac' ? 'active' : ''}" data-nav="category" data-cat="mac">💻 ${t('nav_mac')}</button></li>
           <li><button class="nav-link ${currentCategory === 'windows' ? 'active' : ''}" data-nav="category" data-cat="windows">🖥️ ${t('nav_windows')}</button></li>
           <li><button class="nav-link scam-link ${currentCategory === 'scams' ? 'active' : ''}" data-nav="category" data-cat="scams">${t('nav_scams')}</button></li>
+          <li><button class="nav-link chat-nav-link ${currentPage === 'chat' ? 'active' : ''}" data-nav="chat">💬 ${getLang() === 'th' ? 'ถามน้องไอที' : 'Ask AI'}</button></li>
         </ul>
 
         <div class="nav-controls">
@@ -243,6 +244,8 @@ function renderPage() {
       return renderArticlePage();
     case 'privacy':
       return renderPrivacyPage();
+    case 'chat':
+      return renderChatPage();
     default:
       return renderHomePage();
   }
@@ -479,6 +482,122 @@ function renderArticlePage() {
   `;
 }
 
+// ---- In-App Chat Page ----
+function renderChatPage() {
+  const lang = getLang();
+  const isth = lang === 'th';
+
+  const suggestions = isth ? [
+    { icon: '📱', text: 'iPhone ของฉันช้ามาก จะแก้ยังไง?' },
+    { icon: '🔑', text: 'ลืมรหัสผ่าน Apple ID ทำยังไงดี?' },
+    { icon: '🤖', text: 'Android ค้าง รีสตาร์ทไม่ได้' },
+    { icon: '💻', text: 'Mac เครื่องร้อนมาก ใช้พัดลมดังมาก' },
+    { icon: '🖥️', text: 'Windows ขึ้นจอฟ้า BSOD แก้ยังไง?' },
+    { icon: '🚨', text: 'Facebook ถูกแฮก เข้าไม่ได้แล้ว!' },
+    { icon: '📩', text: 'ได้รับ SMS แปลกๆ มีลิงก์น่าสงสัย' },
+    { icon: '💸', text: 'โดนหลอกโอนเงิน ต้องทำอะไรก่อน?' },
+  ] : [
+    { icon: '📱', text: 'My iPhone is very slow, how to fix?' },
+    { icon: '🔑', text: 'Forgot Apple ID password, what to do?' },
+    { icon: '🤖', text: 'Android is frozen, cannot restart' },
+    { icon: '💻', text: 'Mac is overheating and fan is very loud' },
+    { icon: '🖥️', text: 'Windows blue screen BSOD, how to fix?' },
+    { icon: '🚨', text: 'Facebook got hacked, cannot log in!' },
+    { icon: '📩', text: 'Got suspicious SMS with strange link' },
+    { icon: '💸', text: 'I got scammed into sending money, what first?' },
+  ];
+
+  return `
+    <div class="chat-page">
+      <!-- Page Header -->
+      <div class="chat-page-header">
+        <div class="container">
+          <div class="chat-page-hero reveal">
+            <div class="chat-page-avatar">🤖</div>
+            <div class="chat-page-info">
+              <h1 class="chat-page-name">น้องไอที</h1>
+              <p class="chat-page-desc">
+                ${isth
+                  ? 'ผู้ช่วย AI ด้านเทคโนโลยี · ตอบทันที ตลอด 24 ชั่วโมง · ขับเคลื่อนด้วย Llama 3.3 70B'
+                  : 'AI Tech Support Assistant · Instant answers 24/7 · Powered by Llama 3.3 70B'}
+              </p>
+              <div class="chat-page-status">
+                <span class="chat-status-dot"></span>
+                ${isth ? 'ออนไลน์และพร้อมช่วยเหลือ' : 'Online and ready to help'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Container -->
+      <div class="container" style="max-width: 860px;">
+        <div class="chat-page-container reveal reveal-delay-1">
+
+          <!-- Messages -->
+          <div class="chat-page-messages" id="chat-page-messages">
+            <!-- Welcome message -->
+            <div class="chat-page-msg assistant">
+              <div class="chat-page-bubble">
+                <span class="chat-page-bubble-icon">🤖</span>
+                <div class="chat-page-bubble-text">
+                  ${isth
+                    ? 'สวัสดีครับ! ผมน้องไอที 🤖<br><br>ผมช่วยแก้ปัญหาด้านเทคโนโลยีได้ทุกอย่าง ไม่ว่าจะเป็น iPhone, Android, Mac, Windows หรือปัญหามิจฉาชีพออนไลน์ครับ<br><br>ถามได้เลยครับ ไม่มีคำถามไหนที่โง่เกินไป! 😊'
+                    : 'Hello! I\'m น้องไอที 🤖<br><br>I can help you solve any tech problem — iPhone, Android, Mac, Windows, or online scam issues.<br><br>Ask me anything! No question is too simple. 😊'}
+                </div>
+              </div>
+            </div>
+
+            <!-- Suggestion chips -->
+            <div class="chat-page-suggestions" id="chat-page-suggestions">
+              <div class="suggestions-label">${isth ? '💡 คำถามยอดนิยม:' : '💡 Popular questions:'}</div>
+              <div class="suggestions-grid">
+                ${suggestions.map((s) => `
+                  <button class="suggestion-chip" data-text="${s.text}">
+                    <span>${s.icon}</span>
+                    <span>${s.text}</span>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+
+          <!-- Input Area -->
+          <div class="chat-page-input-area">
+            <div class="chat-page-input-row">
+              <textarea
+                id="chat-page-input"
+                class="chat-page-input"
+                placeholder="${isth ? 'พิมพ์คำถามของคุณที่นี่... (Enter เพื่อส่ง, Shift+Enter เพื่อขึ้นบรรทัด)' : 'Type your question here... (Enter to send, Shift+Enter for new line)'}"
+                rows="1"
+                maxlength="2000"
+              ></textarea>
+              <button class="chat-page-send-btn" id="chat-page-send-btn">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+            <div class="chat-page-footer">
+              <span>🔒 ${isth ? 'ข้อความไม่ถูกบันทึก' : 'Messages not stored'}</span>
+              <span>⚡ Llama 3.3 70B · NVIDIA</span>
+              <span>🆘 ${isth ? 'ฉุกเฉิน: โทร 1441' : 'Emergency: call 1441'}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Disclaimer -->
+        <div class="chat-page-disclaimer reveal">
+          ⚠️ ${isth
+            ? 'น้องไอทีเป็น AI ที่ให้คำแนะนำเบื้องต้น หากปัญหารุนแรงควรติดต่อช่างผู้เชี่ยวชาญ สำหรับเรื่องมิจฉาชีพโทร <strong>1441</strong> ทันที'
+            : 'น้องไอที is an AI assistant providing general guidance. For serious issues please contact a professional. For scams call <strong>1441</strong> immediately.'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ---- Privacy Page ----
 function renderPrivacyPage() {
   return `
@@ -565,6 +684,7 @@ function bindEvents() {
       else if (nav === 'category') navigate('category', cat);
       else if (nav === 'article') navigate('article', cat || currentCategory, articleId);
       else if (nav === 'privacy') navigate('privacy');
+      else if (nav === 'chat') navigate('chat');
 
       // Close mobile menu
       const links = document.getElementById('nav-links');
@@ -573,6 +693,9 @@ function bindEvents() {
       if (toggle) toggle.classList.remove('open');
     });
   });
+
+  // In-page chat
+  bindChatPageEvents();
 
   // Search
   const searchInput = document.getElementById('search-input');
@@ -632,6 +755,172 @@ function bindEvents() {
 
   // Setup cookie consent again if needed
   setupCookieConsent();
+
+  // Hide floating FAB on chat page (redundant there)
+  const fab = document.getElementById('chat-fab');
+  const panel = document.getElementById('chat-panel');
+  if (currentPage === 'chat') {
+    if (fab) fab.style.display = 'none';
+    if (panel) panel.style.display = 'none';
+  } else {
+    if (fab) fab.style.display = 'flex';
+    if (panel) panel.style.display = 'flex';
+  }
+}
+
+// ---- In-App Chat Events & Logic ----
+let chatPageMessages = [];
+let chatPageTyping = false;
+
+function bindChatPageEvents() {
+  const input = document.getElementById('chat-page-input');
+  const sendBtn = document.getElementById('chat-page-send-btn');
+  if (!input || !sendBtn) return;
+
+  // Auto-resize textarea
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+  });
+
+  // Send on Enter
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChatPageMessage();
+    }
+  });
+
+  sendBtn.addEventListener('click', sendChatPageMessage);
+
+  // Suggestion chips
+  document.querySelectorAll('.suggestion-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const text = chip.dataset.text;
+      if (text && input) {
+        input.value = text;
+        input.dispatchEvent(new Event('input'));
+        sendChatPageMessage();
+        // hide suggestions
+        const sugg = document.getElementById('chat-page-suggestions');
+        if (sugg) sugg.style.display = 'none';
+      }
+    });
+  });
+}
+
+async function sendChatPageMessage() {
+  const input = document.getElementById('chat-page-input');
+  const text = input?.value.trim();
+  if (!text || chatPageTyping) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  // Hide suggestions
+  const sugg = document.getElementById('chat-page-suggestions');
+  if (sugg) sugg.style.display = 'none';
+
+  chatPageMessages.push({ role: 'user', content: text });
+  appendChatPageMessage('user', text);
+
+  chatPageTyping = true;
+  showChatPageTyping();
+  const sendBtn = document.getElementById('chat-page-send-btn');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = '0.5'; }
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: chatPageMessages }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'API error');
+
+    hideChatPageTyping();
+    chatPageMessages.push({ role: 'assistant', content: data.reply });
+    appendChatPageMessage('assistant', data.reply);
+  } catch (err) {
+    hideChatPageTyping();
+    const lang = getLang();
+    appendChatPageMessage('assistant',
+      lang === 'th'
+        ? 'ขออภัยครับ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง หรือติดต่อเราผ่าน LINE ครับ'
+        : 'Sorry, an error occurred. Please try again or contact us via LINE.',
+      true
+    );
+  } finally {
+    chatPageTyping = false;
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = '1'; }
+    document.getElementById('chat-page-input')?.focus();
+  }
+}
+
+function appendChatPageMessage(role, text, isError = false) {
+  const container = document.getElementById('chat-page-messages');
+  if (!container) return;
+
+  const div = document.createElement('div');
+  div.className = `chat-page-msg ${role}`;
+
+  const formatted = formatChatText(text);
+
+  div.innerHTML = role === 'assistant' ? `
+    <div class="chat-page-bubble ${isError ? 'error' : ''}">
+      <span class="chat-page-bubble-icon">🤖</span>
+      <div class="chat-page-bubble-text">${formatted}</div>
+    </div>
+  ` : `
+    <div class="chat-page-bubble user">
+      <div class="chat-page-bubble-text">${escapeHtmlInline(text)}</div>
+    </div>
+  `;
+
+  div.style.opacity = '0';
+  div.style.transform = 'translateY(12px)';
+  container.appendChild(div);
+  requestAnimationFrame(() => {
+    div.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+    div.style.opacity = '1';
+    div.style.transform = 'translateY(0)';
+  });
+
+  setTimeout(() => container.scrollTop = container.scrollHeight, 60);
+}
+
+function showChatPageTyping() {
+  const container = document.getElementById('chat-page-messages');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.className = 'chat-page-msg assistant';
+  div.id = 'chat-page-typing';
+  div.innerHTML = `
+    <div class="chat-page-bubble">
+      <span class="chat-page-bubble-icon">🤖</span>
+      <div class="chat-typing"><span></span><span></span><span></span></div>
+    </div>`;
+  container.appendChild(div);
+  setTimeout(() => container.scrollTop = container.scrollHeight, 60);
+}
+
+function hideChatPageTyping() {
+  document.getElementById('chat-page-typing')?.remove();
+}
+
+function formatChatText(text) {
+  return escapeHtmlInline(text)
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^(\d+)\.\s(.+)$/gm, '<div class="chat-list-item"><span class="chat-list-num">$1.</span><span>$2</span></div>')
+    .replace(/^[-•]\s(.+)$/gm, '<div class="chat-list-item"><span class="chat-list-num">•</span><span>$1</span></div>')
+    .replace(/\n\n/g, '<br><br>')
+    .replace(/\n/g, '<br>');
+}
+
+function escapeHtmlInline(text) {
+  return String(text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ---- Scroll Animations ----

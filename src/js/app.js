@@ -821,40 +821,65 @@ async function sendChatPageMessage() {
   const sugg = document.getElementById('chat-page-suggestions');
   if (sugg) sugg.style.display = 'none';
 
+  // Add to message history
   chatPageMessages.push({ role: 'user', content: text });
   appendChatPageMessage('user', text);
 
   chatPageTyping = true;
-  showChatPageTyping();
   const sendBtn = document.getElementById('chat-page-send-btn');
   if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = '0.5'; }
 
-  try {
-    const res = await fetch('/api/chat', {
+  const lang = getLang();
+  const isth = lang === 'th';
+
+  // ── Step 1: Show Llama typing indicator ─────────────────
+  showChatPageTyping('llama-typing', isth ? '🤖 น้องไอที กำลังตอบ...' : '🤖 น้องไอที is typing...');
+
+  // ── Step 2: Launch BOTH APIs in parallel ─────────────────
+  const [llamaResult, nemotronResult] = await Promise.allSettled([
+    // Llama 3.3 70B — Thai conversational response
+    fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: chatPageMessages }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'API error');
+    }).then((r) => r.json()),
 
-    hideChatPageTyping();
-    chatPageMessages.push({ role: 'assistant', content: data.reply });
-    appendChatPageMessage('assistant', data.reply);
-  } catch (err) {
-    hideChatPageTyping();
-    const lang = getLang();
+    // Nemotron Ultra — Deep technical analysis
+    fetch('/api/solve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        problem: text,
+        context: chatPageMessages.slice(-6),
+      }),
+    }).then((r) => r.json()),
+  ]);
+
+  // ── Step 3: Show Llama response ─────────────────────────
+  hideChatPageTyping('llama-typing');
+
+  if (llamaResult.status === 'fulfilled' && !llamaResult.value.error) {
+    const reply = llamaResult.value.reply;
+    chatPageMessages.push({ role: 'assistant', content: reply });
+    appendChatPageMessage('assistant', reply);
+  } else {
     appendChatPageMessage('assistant',
-      lang === 'th'
-        ? 'ขออภัยครับ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง หรือติดต่อเราผ่าน LINE ครับ'
-        : 'Sorry, an error occurred. Please try again or contact us via LINE.',
+      isth ? 'ขออภัยครับ น้องไอทีตอบไม่ได้ในขณะนี้ กรุณาลองใหม่ครับ' : 'Sorry, น้องไอที could not respond. Please try again.',
       true
     );
-  } finally {
-    chatPageTyping = false;
-    if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = '1'; }
-    document.getElementById('chat-page-input')?.focus();
   }
+
+  // ── Step 4: Show Nemotron deep analysis card ─────────────
+  if (nemotronResult.status === 'fulfilled' && !nemotronResult.value.error) {
+    appendNemotronCard(nemotronResult.value.solution, isth);
+  } else {
+    // Nemotron failed silently — Llama answer is still shown
+    console.warn('Nemotron solve failed:', nemotronResult.reason || nemotronResult.value?.error);
+  }
+
+  chatPageTyping = false;
+  if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = '1'; }
+  document.getElementById('chat-page-input')?.focus();
 }
 
 function appendChatPageMessage(role, text, isError = false) {
@@ -889,23 +914,28 @@ function appendChatPageMessage(role, text, isError = false) {
   setTimeout(() => container.scrollTop = container.scrollHeight, 60);
 }
 
-function showChatPageTyping() {
+function showChatPageTyping(id = 'chat-page-typing', label = '') {
   const container = document.getElementById('chat-page-messages');
   if (!container) return;
+  // Remove existing if any
+  document.getElementById(id)?.remove();
   const div = document.createElement('div');
   div.className = 'chat-page-msg assistant';
-  div.id = 'chat-page-typing';
+  div.id = id;
   div.innerHTML = `
     <div class="chat-page-bubble">
       <span class="chat-page-bubble-icon">🤖</span>
-      <div class="chat-typing"><span></span><span></span><span></span></div>
+      <div class="chat-typing-wrap">
+        <div class="chat-typing"><span></span><span></span><span></span></div>
+        ${label ? `<div class="chat-typing-label">${label}</div>` : ''}
+      </div>
     </div>`;
   container.appendChild(div);
   setTimeout(() => container.scrollTop = container.scrollHeight, 60);
 }
 
-function hideChatPageTyping() {
-  document.getElementById('chat-page-typing')?.remove();
+function hideChatPageTyping(id = 'chat-page-typing') {
+  document.getElementById(id)?.remove();
 }
 
 function formatChatText(text) {
@@ -921,6 +951,44 @@ function escapeHtmlInline(text) {
   return String(text)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Nemotron Deep Analysis Card ──────────────────────────
+function appendNemotronCard(solution, isth) {
+  const container = document.getElementById('chat-page-messages');
+  if (!container) return;
+
+  const div = document.createElement('div');
+  div.className = 'nemotron-card';
+
+  div.innerHTML = `
+    <div class="nemotron-card-header">
+      <div class="nemotron-card-title">
+        <span class="nemotron-icon">🧠</span>
+        <div>
+          <div class="nemotron-name">Nemotron Ultra 550B</div>
+          <div class="nemotron-subtitle">${isth ? 'การวิเคราะห์เชิงลึก · Chain-of-Thought Reasoning' : 'Deep Analysis · Chain-of-Thought Reasoning'}</div>
+        </div>
+      </div>
+      <span class="nemotron-badge">${isth ? 'เชี่ยวชาญ' : 'Expert'}</span>
+    </div>
+    <div class="nemotron-card-body">${formatChatText(solution)}</div>
+    <div class="nemotron-card-footer">
+      ⚡ ${isth ? 'ขับเคลื่อนโดย NVIDIA Nemotron Ultra 550B • ใช้ควบคู่กับคำแนะนำจากน้องไอทีด้านบน' : 'Powered by NVIDIA Nemotron Ultra 550B • Use alongside น้องไอที\'s answer above'}
+    </div>
+  `;
+
+  // Animate in
+  div.style.opacity = '0';
+  div.style.transform = 'translateY(16px)';
+  container.appendChild(div);
+  requestAnimationFrame(() => {
+    div.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+    div.style.opacity = '1';
+    div.style.transform = 'translateY(0)';
+  });
+
+  setTimeout(() => container.scrollTop = container.scrollHeight, 80);
 }
 
 // ---- Scroll Animations ----

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- SEO -->
+  <title>CS Customer Support — ศูนย์ช่วยเหลือเทคโนโลยี สำหรับคนไทย</title>
+  <meta name="description" content="ศูนย์ช่วยเหลือเทคโนโลยี แก้ปัญหา iPhone, Android, Mac, Windows ง่ายๆ ด้วยตัวเอง พร้อมคำแนะนำป้องกันมิจฉาชีพออนไลน์ — Tech Help Center for Thai Users" />
+  <meta name="keywords" content="ช่วยเหลือ, เทคโนโลยี, iPhone, Android, Mac, Windows, มิจฉาชีพ, แฮก Facebook, LINE, คนไทย, tech support, Thailand" />
+  <meta name="author" content="CS Customer Support" />
+  <meta name="robots" content="index, follow" />
+
+  <!-- Open Graph / Facebook / LINE -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="CS Customer Support — ศูนย์ช่วยเหลือเทคโนโลยี" />
+  <meta property="og:description" content="แก้ปัญหา iPhone, Android, Mac, Windows ง่ายๆ ด้วยตัวเอง พร้อมคำแนะนำป้องกันมิจฉาชีพออนไลน์" />
+  <meta property="og:locale" content="th_TH" />
+  <meta property="og:site_name" content="CS Customer Support" />
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="/src/styles/index.css" />
+  <link rel="stylesheet" href="/src/styles/components.css" />
+
+  <!-- Preconnect to Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+</head>
+<body>
+  <div id="app">
+    <!-- Loading state while JS initializes -->
+    <div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: 'Kanit', sans-serif;">
+      <div style="text-align: center; color: #94a3b8;">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🛡️</div>
+        <div style="font-size: 1.2rem; background: linear-gradient(135deg, #7c3aed, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 600;">CS Customer Support</div>
+        <div style="margin-top: 0.5rem; font-size: 0.9rem;">กำลังโหลด...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Script -->
+  <script type="module">
+    import { initApp } from '/src/js/app.js';
+    initApp();
+  </script>
+</body>
+</html>

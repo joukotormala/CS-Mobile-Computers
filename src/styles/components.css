@@ -1903,6 +1903,20 @@
   background: rgba(245, 158, 11, 0.03);
 }
 
+/* Article saved badge */
+.article-saved-badge {
+  text-align: center;
+  font-size: var(--text-xs);
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: var(--radius-full);
+  padding: var(--space-xs) var(--space-lg);
+  margin: 0 auto;
+  width: fit-content;
+}
+
+
 /* Typing label */
 .chat-typing-wrap {
   display: flex;

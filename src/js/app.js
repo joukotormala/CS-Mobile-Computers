@@ -7,6 +7,7 @@ import { initChat } from './chat.js';
 
 // Will be loaded once articles.js is ready
 let articles = [];
+let solvedArticles = [];
 
 // ---- State ----
 let currentPage = 'home';
@@ -29,11 +30,16 @@ const categories = [
 // ---- Initialize ----
 export async function initApp() {
   try {
-    const module = await import('../data/articles.js');
-    articles = module.articles || [];
+    const [baseModule, solvedModule] = await Promise.allSettled([
+      import('../data/articles.js'),
+      import('../data/solved-articles.js'),
+    ]);
+    articles = baseModule.status === 'fulfilled' ? (baseModule.value.articles || []) : [];
+    solvedArticles = solvedModule.status === 'fulfilled' ? (solvedModule.value.solvedArticles || []) : [];
   } catch (e) {
-    console.warn('Articles not loaded yet:', e);
+    console.warn('Articles not loaded:', e);
     articles = [];
+    solvedArticles = [];
   }
 
   setupTheme();
@@ -809,6 +815,17 @@ function bindChatPageEvents() {
   });
 }
 
+// ── Build article context for Llama's RAG prompt ─────────────
+function buildArticleContext() {
+  const all = [...articles, ...solvedArticles];
+  if (all.length === 0) return 'ยังไม่มีบทความในฐานข้อมูล';
+  return all.map((a) => {
+    const title = getArticleText(a.title);
+    const tags = (a.tags || []).join(', ');
+    return `- [${a.id}] ${title} (${a.category}) | ${tags}`;
+  }).join('\n');
+}
+
 async function sendChatPageMessage() {
   const input = document.getElementById('chat-page-input');
   const text = input?.value.trim();
@@ -817,11 +834,9 @@ async function sendChatPageMessage() {
   input.value = '';
   input.style.height = 'auto';
 
-  // Hide suggestions
   const sugg = document.getElementById('chat-page-suggestions');
   if (sugg) sugg.style.display = 'none';
 
-  // Add to message history
   chatPageMessages.push({ role: 'user', content: text });
   appendChatPageMessage('user', text);
 
@@ -832,55 +847,126 @@ async function sendChatPageMessage() {
   const lang = getLang();
   const isth = lang === 'th';
 
-  // ── Step 1: Show Llama typing indicator ─────────────────
-  showChatPageTyping('llama-typing', isth ? '🤖 น้องไอที กำลังตอบ...' : '🤖 น้องไอที is typing...');
+  // ━━ PHASE 1: Llama searches articles ━━━━━━━━━━━━━━━━━━━━━━
+  showChatPageTyping('llama-typing',
+    isth ? '🤖 น้องไอที กำลังค้นหาในฐานความรู้...' : '🤖 น้องไอที searching knowledge base...');
 
-  // ── Step 2: Launch BOTH APIs in parallel ─────────────────
-  const [llamaResult, nemotronResult] = await Promise.allSettled([
-    // Llama 3.3 70B — Thai conversational response
-    fetch('/api/chat', {
+  let llamaReply = '';
+  let needsSolve = false;
+
+  try {
+    const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: chatPageMessages }),
-    }).then((r) => r.json()),
+      body: JSON.stringify({
+        messages: chatPageMessages,
+        articleContext: buildArticleContext(),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'API error');
+    llamaReply = data.reply;
+    needsSolve = data.needsSolve === true;
+  } catch (err) {
+    hideChatPageTyping('llama-typing');
+    appendChatPageMessage('assistant',
+      isth ? 'ขออภัยครับ น้องไอทีตอบไม่ได้ในขณะนี้ กรุณาลองใหม่ครับ' : 'Sorry, could not respond. Please try again.',
+      true
+    );
+    chatPageTyping = false;
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = '1'; }
+    return;
+  }
 
-    // Nemotron Ultra — Deep technical analysis
-    fetch('/api/solve', {
+  hideChatPageTyping('llama-typing');
+  chatPageMessages.push({ role: 'assistant', content: llamaReply });
+  appendChatPageMessage('assistant', llamaReply);
+
+  // Article found — done! ✅
+  if (!needsSolve) {
+    chatPageTyping = false;
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = '1'; }
+    document.getElementById('chat-page-input')?.focus();
+    return;
+  }
+
+  // ━━ PHASE 2: Nemotron solves the unknown problem ━━━━━━━━━━━
+  showChatPageTyping('nemotron-typing',
+    isth ? '🧠 Nemotron Ultra กำลังวิเคราะห์เชิงลึก...' : '🧠 Nemotron Ultra analyzing deeply...');
+
+  try {
+    const res = await fetch('/api/solve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         problem: text,
         context: chatPageMessages.slice(-6),
       }),
-    }).then((r) => r.json()),
-  ]);
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Solve error');
 
-  // ── Step 3: Show Llama response ─────────────────────────
-  hideChatPageTyping('llama-typing');
+    hideChatPageTyping('nemotron-typing');
 
-  if (llamaResult.status === 'fulfilled' && !llamaResult.value.error) {
-    const reply = llamaResult.value.reply;
-    chatPageMessages.push({ role: 'assistant', content: reply });
-    appendChatPageMessage('assistant', reply);
-  } else {
-    appendChatPageMessage('assistant',
-      isth ? 'ขออภัยครับ น้องไอทีตอบไม่ได้ในขณะนี้ กรุณาลองใหม่ครับ' : 'Sorry, น้องไอที could not respond. Please try again.',
-      true
-    );
-  }
+    // Show Nemotron's deep analysis card
+    if (data.solution) {
+      appendNemotronCard(data.solution, isth);
+      chatPageMessages.push({ role: 'assistant', content: data.solution });
+    }
 
-  // ── Step 4: Show Nemotron deep analysis card ─────────────
-  if (nemotronResult.status === 'fulfilled' && !nemotronResult.value.error) {
-    appendNemotronCard(nemotronResult.value.solution, isth);
-  } else {
-    // Nemotron failed silently — Llama answer is still shown
-    console.warn('Nemotron solve failed:', nemotronResult.reason || nemotronResult.value?.error);
+    // ━━ PHASE 3: Save new article to knowledge base ━━━━━━━━━━
+    if (data.article) {
+      // Save to server (writes to solved-articles.js)
+      fetch('/api/save-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ article: data.article }),
+      }).then(() => {
+        // Add to in-memory solved articles list immediately
+        if (!solvedArticles.find((a) => a.id === data.article.id)) {
+          solvedArticles.push(data.article);
+          console.log(`💾 New article added: "${data.article.title?.th || data.article.id}"`);
+          // Show subtle notification
+          showArticleSavedBadge(data.article, isth);
+        }
+      }).catch((e) => console.warn('Save article failed:', e));
+    }
+
+  } catch (err) {
+    hideChatPageTyping('nemotron-typing');
+    console.warn('Nemotron failed:', err);
+    // Don't show error — Llama already gave the escalation message
   }
 
   chatPageTyping = false;
   if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = '1'; }
   document.getElementById('chat-page-input')?.focus();
 }
+
+// Show a subtle "New article saved" badge
+function showArticleSavedBadge(article, isth) {
+  const container = document.getElementById('chat-page-messages');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.className = 'article-saved-badge';
+  div.innerHTML = `
+    💾 ${isth
+      ? `บทความใหม่ถูกบันทึกแล้ว: <strong>"${article.title?.th || ''}"</strong>`
+      : `New article saved: <strong>"${article.title?.en || ''}"</strong>`}
+  `;
+  div.style.opacity = '0';
+  container.appendChild(div);
+  requestAnimationFrame(() => {
+    div.style.transition = 'opacity 0.5s ease';
+    div.style.opacity = '1';
+  });
+  setTimeout(() => {
+    div.style.opacity = '0';
+    setTimeout(() => div.remove(), 500);
+  }, 4000);
+  setTimeout(() => container.scrollTop = container.scrollHeight, 60);
+}
+
 
 function appendChatPageMessage(role, text, isError = false) {
   const container = document.getElementById('chat-page-messages');

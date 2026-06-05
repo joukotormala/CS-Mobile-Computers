@@ -1,41 +1,51 @@
 // ========================================
-// Vercel Serverless Function — Nemotron Ultra Solver
-// Model: nvidia/nemotron-3-ultra-550b-a55b
-// Deep technical problem analysis (runs in parallel with Llama)
+// api/solve.js — Nemotron Ultra 550B
+// Role: Deep technical solver + Article generator
+// Triggered when Llama finds no article match
+// Returns: { solution, article } — article gets saved
 // ========================================
 
-// Use Node.js runtime for longer timeout (Nemotron is a 550B model)
 export const config = { maxDuration: 60 };
 
-const SOLVE_SYSTEM_PROMPT = `You are "Nemotron Expert" — a senior IT engineer and cybersecurity specialist with 20+ years experience.
+const SOLVE_SYSTEM = `You are "Nemotron Expert" — a senior IT engineer and cybersecurity specialist with 20+ years of experience.
 
-Your job is to deeply analyze tech support problems and provide COMPREHENSIVE solutions.
+Your job is TWO things:
+1. Provide a COMPREHENSIVE technical solution to the customer's problem
+2. Generate a STRUCTURED ARTICLE that can be saved to our knowledge base
 
-When given a problem, structure your response EXACTLY like this:
+Respond ONLY with valid JSON in this exact format:
+{
+  "solution": "Friendly Thai explanation of the solution (3-5 clear steps, use emoji, natural Thai language)",
+  "article": {
+    "id": "auto-[topic]-[random 4 digits]",
+    "icon": "[single emoji]",
+    "category": "[iphone|android|mac|windows|scams]",
+    "difficulty": "[easy|medium|hard]",
+    "title": {
+      "th": "[Thai article title]",
+      "en": "[English article title]"
+    },
+    "description": {
+      "th": "[Thai description 1-2 sentences]",
+      "en": "[English description 1-2 sentences]"
+    },
+    "tags": ["tag1", "tag2", "tag3"],
+    "steps": [
+      {
+        "title": { "th": "Thai step title", "en": "English step title" },
+        "content": { "th": "Thai detailed explanation", "en": "English detailed explanation" },
+        "tip": { "th": "Optional Thai tip", "en": "Optional English tip" }
+      }
+    ]
+  }
+}
 
-🔍 **สาเหตุที่เป็นไปได้ (Root Causes)**
-- List the most likely causes
-
-✅ **วิธีแก้ปัญหาหลัก (Primary Solution)**
-1. Step one
-2. Step two
-(numbered steps, very clear)
-
-🔄 **วิธีสำรอง (Alternative Solutions)**
-- If step above doesn't work, try these
-
-💡 **คำแนะนำเพิ่มเติม (Pro Tips)**
-- Prevention and best practices
-
-⚠️ **คำเตือน (Warnings)**
-- Any data loss risks, important cautions
-
-RULES:
-- Respond in Thai if the question is in Thai, English if English
-- For Thai: use natural Thai with technical terms in (parentheses)  
-- Be thorough — this is the expert deep-dive, not a quick answer
-- For scam/hacking issues: always include 📞 AOC 1441 and thaipoliceonline.go.th
-- Assume user is non-technical — explain clearly`;
+IMPORTANT:
+- For scam/security issues: include emergency number 1441 in solution
+- The "solution" field should be warm, friendly Thai text for the customer
+- The "article" should be comprehensive for future customers with the same problem
+- category must be exactly one of: iphone, android, mac, windows, scams
+- Keep solution concise (max 5 steps), article steps can be more detailed`;
 
 export default async function handler(request) {
   const headers = {
@@ -58,25 +68,6 @@ export default async function handler(request) {
   const { problem, context = [] } = body;
   if (!problem) return new Response(JSON.stringify({ error: 'No problem provided' }), { status: 400, headers });
 
-  // Build conversation context (last few messages for context)
-  const recentContext = context.slice(-4);
-
-  const payload = {
-    model: 'nvidia/nemotron-3-ultra-550b-a55b',
-    messages: [
-      { role: 'system', content: SOLVE_SYSTEM_PROMPT },
-      ...recentContext,
-      { role: 'user', content: `วิเคราะห์ปัญหานี้อย่างละเอียด และให้วิธีแก้ที่ครอบคลุม:\n\n"${problem}"` },
-    ],
-    temperature: 0.3,      // Lower = more precise technical answers
-    top_p: 0.95,
-    max_tokens: 2048,
-    stream: false,
-    // Enable Nemotron's chain-of-thought reasoning
-    chat_template_kwargs: { enable_thinking: true },
-    reasoning_budget: 8192,
-  };
-
   try {
     const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
@@ -84,22 +75,60 @@ export default async function handler(request) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        model: 'nvidia/nemotron-3-ultra-550b-a55b',
+        messages: [
+          { role: 'system', content: SOLVE_SYSTEM },
+          ...context.slice(-4),
+          {
+            role: 'user',
+            content: `Analyze this customer problem and provide solution + knowledge base article:\n\n"${problem}"\n\nRespond with valid JSON only.`
+          },
+        ],
+        temperature: 0.2,
+        top_p: 0.95,
+        max_tokens: 3000,
+        stream: false,
+        chat_template_kwargs: { enable_thinking: true },
+        reasoning_budget: 6144,
+      }),
     });
 
     if (!res.ok) {
       const err = await res.text();
-      console.error('Nemotron API error:', err);
       return new Response(JSON.stringify({ error: 'Nemotron API error', detail: err }), { status: 502, headers });
     }
 
     const data = await res.json();
-    const solution = data?.choices?.[0]?.message?.content || 'ไม่สามารถวิเคราะห์ได้ในขณะนี้';
-    const thinking = data?.choices?.[0]?.message?.reasoning_content || null;
+    const rawContent = data?.choices?.[0]?.message?.content || '';
 
-    return new Response(JSON.stringify({ solution, thinking }), { status: 200, headers });
+    // Extract JSON from response (Nemotron may wrap it in markdown)
+    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return new Response(JSON.stringify({
+        error: 'Invalid response format',
+        solution: rawContent.slice(0, 500),
+        article: null,
+      }), { status: 200, headers });
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      return new Response(JSON.stringify({
+        solution: rawContent.slice(0, 1000),
+        article: null,
+      }), { status: 200, headers });
+    }
+
+    return new Response(JSON.stringify({
+      solution: parsed.solution || rawContent,
+      article: parsed.article || null,
+    }), { status: 200, headers });
+
   } catch (err) {
-    console.error('Nemotron fetch error:', err);
+    console.error('Nemotron error:', err);
     return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500, headers });
   }
 }

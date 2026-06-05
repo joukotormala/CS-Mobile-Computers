@@ -1,35 +1,28 @@
 // ========================================
-// Vercel Serverless Function — NVIDIA Llama Proxy
-// Model: meta/llama-3.3-70b-instruct
-// Keeps API key secret (never exposed to browser)
+// api/chat.js — Llama 3.3 70B
+// Role: Article-aware RAG + Escalation Router
+// 1. Search existing articles for a match
+// 2. If match → answer customer in Thai
+// 3. If no match → ESCALATE (trigger Nemotron)
 // ========================================
 
 export const config = { runtime: 'edge' };
 
-const SYSTEM_PROMPT = `คุณคือผู้ช่วยช่วยเหลือด้านเทคโนโลยีชื่อ "น้องไอที" สำหรับเว็บไซต์ CS Customer Support
-คุณเชี่ยวชาญในการแก้ปัญหา:
-- 📱 iPhone และ iOS (Apple ID, Wi-Fi, พื้นที่จัดเก็บ, อัปเดต, แบตเตอรี่)
-- 🤖 Android (Samsung, OPPO, Xiaomi, Google Account, แคช, ความเร็ว)
-- 💻 Mac และ macOS (เครื่องช้า, เครื่องร้อน, อัปเดต, iCloud)
-- 🖥️ Windows (BSOD, ไวรัส, อัปเดต, ความเร็ว)
-- 🚨 มิจฉาชีพออนไลน์ (Facebook ถูกแฮก, LINE หลอกลวง, SMS phishing, การโอนเงิน)
+// Llama's system prompt — knows to escalate when no article matches
+const buildSystemPrompt = (articleContext) => `คุณคือ "น้องไอที" ผู้ช่วย AI ด้านเทคโนโลยีของ CS Help
+คุณมีฐานความรู้บทความเทคนิคดังต่อไปนี้:
 
-กฎในการตอบ:
-1. ตอบเป็นภาษาไทยเสมอ เว้นแต่ผู้ใช้จะถามเป็นภาษาอังกฤษ
-2. ใช้ภาษาที่เป็นกันเอง สุภาพ และเข้าใจง่าย ใช้ "ครับ" ท้ายประโยค
-3. แบ่งคำตอบเป็นขั้นตอนที่ชัดเจน ใช้ตัวเลขหรือ emoji นำหน้า
-4. หากถูกถามเรื่องมิจฉาชีพหรือฉุกเฉิน ให้แจ้งเบอร์ 1441 (AOC) และ thaipoliceonline.go.th ทันที
-5. ตอบกระชับ ไม่เกิน 5-6 ขั้นตอน หากซับซ้อนให้แนะนำให้ติดต่อ LINE
-6. หากไม่แน่ใจ ให้บอกตรงๆ และแนะนำให้ติดต่อช่างผู้เชี่ยวชาญ
-7. อย่าตอบเรื่องที่ไม่เกี่ยวกับเทคโนโลยีหรือความปลอดภัยออนไลน์
+${articleContext}
 
-เบอร์ฉุกเฉิน (ใช้เมื่อเกี่ยวกับมิจฉาชีพ):
-- 🆘 สายด่วน AOC: 1441 (24 ชั่วโมง)
-- 👮 ตำรวจท่องเที่ยว: 1155
-- 🌐 แจ้งความออนไลน์: thaipoliceonline.go.th`;
+กฎการตอบ:
+1. ค้นหาในบทความด้านบนก่อน ถ้าเจอบทความที่ตรงกับปัญหา → ตอบโดยอ้างอิงความรู้จากบทความนั้น ตอบเป็นภาษาไทย กระชับ เป็นมิตร
+2. ถ้าไม่มีบทความที่ตรงกับปัญหาเลย → ตอบด้วยข้อความ ESCALATE: ตามด้วยข้อความแจ้งลูกค้าว่ากำลังส่งให้ช่างผู้เชี่ยวชาญ
+   ตัวอย่าง: ESCALATE: ขออภัยครับ ปัญหานี้ยังไม่มีในฐานความรู้ของเรา กำลังส่งให้ช่างผู้เชี่ยวชาญวิเคราะห์ให้ครับ รอสักครู่นะครับ...
+3. ถ้าเป็นเรื่องมิจฉาชีพฉุกเฉิน → โทร 1441 ทันที แม้ว่าจะไม่มีบทความ
+4. ตอบสั้น กระชับ ไม่เกิน 5 ขั้นตอน ถ้าซับซ้อนให้ escalate
+5. ใช้ภาษาไทยเป็นหลัก ยกเว้นลูกค้าถามภาษาอังกฤษ`;
 
 export default async function handler(request) {
-  // CORS headers
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
@@ -37,67 +30,60 @@ export default async function handler(request) {
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 
-  // Handle preflight
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers });
-  }
-
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers });
-  }
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+  if (request.method !== 'POST') return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers });
 
   const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'NVIDIA API key not configured' }), { status: 500, headers });
-  }
+  if (!apiKey) return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers });
 
   let body;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers });
-  }
+  try { body = await request.json(); }
+  catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers }); }
 
-  const { messages } = body;
+  const { messages, articleContext = '' } = body;
   if (!messages || !Array.isArray(messages)) {
-    return new Response(JSON.stringify({ error: 'Invalid messages format' }), { status: 400, headers });
+    return new Response(JSON.stringify({ error: 'Invalid messages' }), { status: 400, headers });
   }
 
-  // Build NVIDIA / OpenAI-compatible request
-  const nvidiaPayload = {
-    model: 'meta/llama-3.3-70b-instruct',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...messages.map((m) => ({ role: m.role, content: m.content })),
-    ],
-    temperature: 0.7,
-    top_p: 0.95,
-    max_tokens: 1024,
-    stream: false,
-  };
+  const systemPrompt = buildSystemPrompt(articleContext);
 
   try {
-    const nvidiaRes = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+    const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(nvidiaPayload),
+      body: JSON.stringify({
+        model: 'meta/llama-3.3-70b-instruct',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+        ],
+        temperature: 0.6,
+        top_p: 0.95,
+        max_tokens: 800,
+        stream: false,
+      }),
     });
 
-    if (!nvidiaRes.ok) {
-      const err = await nvidiaRes.text();
-      console.error('NVIDIA API error:', err);
-      return new Response(JSON.stringify({ error: 'NVIDIA API error', detail: err }), { status: 502, headers });
+    if (!res.ok) {
+      const err = await res.text();
+      return new Response(JSON.stringify({ error: 'Llama API error', detail: err }), { status: 502, headers });
     }
 
-    const data = await nvidiaRes.json();
-    const text = data?.choices?.[0]?.message?.content || 'ขออภัยครับ ไม่สามารถตอบได้ในขณะนี้';
+    const data = await res.json();
+    const rawReply = data?.choices?.[0]?.message?.content || 'ESCALATE: ขออภัยครับ ไม่สามารถตอบได้ในขณะนี้ กำลังส่งให้ช่างผู้เชี่ยวชาญครับ';
 
-    return new Response(JSON.stringify({ reply: text }), { status: 200, headers });
+    // Detect escalation signal
+    const needsSolve = rawReply.trim().startsWith('ESCALATE:');
+    const reply = needsSolve
+      ? rawReply.replace(/^ESCALATE:\s*/i, '').trim()
+      : rawReply;
+
+    return new Response(JSON.stringify({ reply, needsSolve }), { status: 200, headers });
   } catch (err) {
-    console.error('Fetch error:', err);
+    console.error('Chat error:', err);
     return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500, headers });
   }
 }

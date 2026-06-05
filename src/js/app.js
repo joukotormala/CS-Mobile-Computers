@@ -379,11 +379,11 @@ function renderNav() {
 
         <ul class="nav-links" id="nav-links">
           <li><button class="nav-link ${currentPage === 'home' ? 'active' : ''}" data-nav="home">${t('nav_home')}</button></li>
-          <li><button class="nav-link ${currentCategory === 'iphone' ? 'active' : ''}" data-nav="category" data-cat="iphone">📱 ${t('nav_iphone')}</button></li>
-          <li><button class="nav-link ${currentCategory === 'android' ? 'active' : ''}" data-nav="category" data-cat="android">🤖 ${t('nav_android')}</button></li>
-          <li><button class="nav-link ${currentCategory === 'mac' ? 'active' : ''}" data-nav="category" data-cat="mac">💻 ${t('nav_mac')}</button></li>
-          <li><button class="nav-link ${currentCategory === 'windows' ? 'active' : ''}" data-nav="category" data-cat="windows">🖥️ ${t('nav_windows')}</button></li>
-          <li><button class="nav-link scam-link ${currentCategory === 'scams' ? 'active' : ''}" data-nav="category" data-cat="scams">${t('nav_scams')}</button></li>
+          <li><button class="nav-link ${currentCategory === 'iphone' ? 'active' : ''}" data-device="iphone">📱 ${t('nav_iphone')}</button></li>
+          <li><button class="nav-link ${currentCategory === 'android' ? 'active' : ''}" data-device="android">🤖 ${t('nav_android')}</button></li>
+          <li><button class="nav-link ${currentCategory === 'mac' ? 'active' : ''}" data-device="mac">💻 ${t('nav_mac')}</button></li>
+          <li><button class="nav-link ${currentCategory === 'windows' ? 'active' : ''}" data-device="windows">🖥️ ${t('nav_windows')}</button></li>
+          <li><button class="nav-link scam-link ${currentCategory === 'scams' ? 'active' : ''}" data-device="scams">${t('nav_scams')}</button></li>
         </ul>
 
         <div class="nav-controls">
@@ -417,11 +417,7 @@ function renderPage() {
 // ---- Home Page ----
 function renderHomePage() {
   const lang = getLang();
-  const popularArticles = articles.slice(0, 6);
-  const articlesByCategory = {};
-  articles.forEach((a) => {
-    articlesByCategory[a.category] = (articlesByCategory[a.category] || 0) + 1;
-  });
+  const popularArticles = [...articles, ...solvedArticles].slice(0, 6);
 
   return `
     <section class="hero">
@@ -446,20 +442,10 @@ function renderHomePage() {
     </section>
 
     <div class="container">
-      <!-- Scam Alert Banner -->
-      <div class="scam-alert-banner reveal" id="scam-alert-banner">
-        <span class="scam-alert-icon">🚨</span>
-        <div class="scam-alert-content">
-          <div class="scam-alert-title">${t('scam_alert_title')}</div>
-          <div class="scam-alert-text">${t('scam_alert_text')}</div>
-        </div>
-        <span class="scam-alert-arrow">${t('scam_alert_cta')}</span>
-      </div>
-
       <!-- Stats -->
       <div class="stats-bar reveal">
         <div class="stat-item">
-          <div class="stat-number">${articles.length}+</div>
+          <div class="stat-number">${articles.length + solvedArticles.length}+</div>
           <div class="stat-label">${t('stat_articles')}</div>
         </div>
         <div class="stat-item">
@@ -472,16 +458,14 @@ function renderHomePage() {
         </div>
       </div>
 
-      <!-- Category Cards -->
-      <div class="category-grid">
-        ${categories.map((cat, i) => `
-          <div class="category-card ${cat.colorClass} ripple reveal reveal-delay-${i + 1}" data-nav="category" data-cat="${cat.id}">
-            <span class="category-icon">${cat.icon}</span>
-            <div class="category-title">${t(`cat_${cat.id}_title`)}</div>
-            <div class="category-desc">${t(`cat_${cat.id}_desc`)}</div>
-            <span class="category-count">${articlesByCategory[cat.id] || 0} ${t('articles_count')}</span>
-          </div>
-        `).join('')}
+      <!-- Scam Alert Banner (moved below stats) -->
+      <div class="scam-alert-banner reveal" id="scam-alert-banner">
+        <span class="scam-alert-icon">🚨</span>
+        <div class="scam-alert-content">
+          <div class="scam-alert-title">${t('scam_alert_title')}</div>
+          <div class="scam-alert-text">${t('scam_alert_text')}</div>
+        </div>
+        <span class="scam-alert-arrow">${t('scam_alert_cta')}</span>
       </div>
 
       <!-- Popular Articles -->
@@ -496,6 +480,10 @@ function renderHomePage() {
         </section>
       ` : ''}
     </div>
+
+    <!-- Device Panel Overlay -->
+    <div class="device-panel-overlay" id="device-panel-overlay"></div>
+    <aside class="device-panel" id="device-panel"></aside>
   `;
 }
 
@@ -833,9 +821,295 @@ function renderCookieBanner() {
   `;
 }
 
+// ═══════════════════════════════════════════════════════
+// Device Panel — slide-in drawer from the right
+// ═══════════════════════════════════════════════════════
+const catMeta = {
+  iphone:  { icon: '📱', color: 'rgba(59,130,246,0.15)',  border: 'rgba(59,130,246,0.3)'  },
+  android: { icon: '🤖', color: 'rgba(16,185,129,0.15)', border: 'rgba(16,185,129,0.3)'  },
+  mac:     { icon: '💻', color: 'rgba(139,92,246,0.15)', border: 'rgba(139,92,246,0.3)'  },
+  windows: { icon: '🖥️', color: 'rgba(14,165,233,0.15)', border: 'rgba(14,165,233,0.3)'  },
+  scams:   { icon: '🚨', color: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.3)'  },
+};
+
+let devicePanelSearchTimer = null;
+let devicePanelSearchRunning = false;
+
+function openDevicePanel(catId) {
+  const panel = document.getElementById('device-panel');
+  const overlay = document.getElementById('device-panel-overlay');
+  if (!panel || !overlay) return;
+
+  const lang = getLang();
+  const isth = lang === 'th';
+  const meta = catMeta[catId] || { icon: '📋', color: 'transparent', border: 'transparent' };
+  const cat = categories.find((c) => c.id === catId);
+  const catLabel = cat ? t(`cat_${catId}_title`) : catId;
+  const allArticles = [...articles, ...solvedArticles];
+  const catArticles = allArticles.filter((a) => a.category === catId);
+
+  panel.innerHTML = `
+    <div class="dp-header" style="background:${meta.color}; border-bottom: 1px solid ${meta.border};">
+      <div class="dp-title">
+        <span class="dp-icon">${meta.icon}</span>
+        <div>
+          <div class="dp-name">${catLabel}</div>
+          <div class="dp-sub">${catArticles.length} ${isth ? 'บทความ' : 'articles'}</div>
+        </div>
+      </div>
+      <button class="dp-close" id="dp-close-btn">✕</button>
+    </div>
+
+    <div class="dp-search-wrap">
+      <span class="dp-search-icon">🔍</span>
+      <input
+        type="text"
+        class="dp-search-input"
+        id="dp-search-input"
+        placeholder="${isth ? `ค้นหาปัญหา ${catLabel}...` : `Search ${catLabel} problems...`}"
+        autocomplete="off"
+      />
+    </div>
+
+    <div class="dp-articles" id="dp-articles">
+      ${catArticles.length > 0
+        ? catArticles.map((a) => `
+            <div class="dp-article-item" data-nav="article" data-cat="${a.category}" data-article="${a.id}">
+              <span class="dp-article-icon">${a.icon}</span>
+              <div class="dp-article-info">
+                <div class="dp-article-title">${getArticleText(a.title)}</div>
+                <div class="dp-article-desc">${getArticleText(a.description)}</div>
+              </div>
+              <span class="dp-article-arrow">›</span>
+            </div>
+          `).join('')
+        : `<div class="dp-empty">${isth ? 'กำลังเพิ่มบทความ...' : 'Articles coming soon...'}</div>`
+      }
+    </div>
+
+    <div class="dp-ai-area" id="dp-ai-area" style="display:none;"></div>
+  `;
+
+  // Open animation
+  overlay.classList.add('active');
+  panel.classList.add('open');
+
+  // Close button
+  document.getElementById('dp-close-btn')?.addEventListener('click', closeDevicePanel);
+  overlay.addEventListener('click', closeDevicePanel, { once: true });
+
+  // Article clicks inside panel
+  panel.querySelectorAll('[data-nav="article"]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.article;
+      const art = allArticles.find((a) => a.id === id);
+      if (art) {
+        closeDevicePanel();
+        navigate('article', art.category, art.id);
+      }
+    });
+  });
+
+  // Panel search input
+  const dpInput = document.getElementById('dp-search-input');
+  if (dpInput) {
+    dpInput.addEventListener('input', (e) => handleDeviceSearch(e.target.value, catId));
+    dpInput.focus();
+  }
+}
+
+function closeDevicePanel() {
+  const panel = document.getElementById('device-panel');
+  const overlay = document.getElementById('device-panel-overlay');
+  if (panel) panel.classList.remove('open');
+  if (overlay) overlay.classList.remove('active');
+  devicePanelSearchRunning = false;
+  clearTimeout(devicePanelSearchTimer);
+}
+
+function handleDeviceSearch(query, catId) {
+  const articlesEl = document.getElementById('dp-articles');
+  const aiArea = document.getElementById('dp-ai-area');
+  const lang = getLang();
+  const isth = lang === 'th';
+  const allArticles = [...articles, ...solvedArticles];
+
+  clearTimeout(devicePanelSearchTimer);
+
+  if (!query || query.length < 2) {
+    // Reset to full article list
+    const catArticles = allArticles.filter((a) => a.category === catId);
+    if (articlesEl) articlesEl.style.display = '';
+    if (aiArea) { aiArea.style.display = 'none'; aiArea.innerHTML = ''; }
+    if (articlesEl) {
+      articlesEl.innerHTML = catArticles.map((a) => `
+        <div class="dp-article-item" data-nav="article" data-cat="${a.category}" data-article="${a.id}">
+          <span class="dp-article-icon">${a.icon}</span>
+          <div class="dp-article-info">
+            <div class="dp-article-title">${getArticleText(a.title)}</div>
+            <div class="dp-article-desc">${getArticleText(a.description)}</div>
+          </div>
+          <span class="dp-article-arrow">›</span>
+        </div>
+      `).join('') || `<div class="dp-empty">${isth ? 'กำลังเพิ่มบทความ...' : 'Coming soon...'}</div>`;
+      articlesEl.querySelectorAll('[data-nav="article"]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const art = allArticles.find((a) => a.id === el.dataset.article);
+          if (art) { closeDevicePanel(); navigate('article', art.category, art.id); }
+        });
+      });
+    }
+    return;
+  }
+
+  const q = query.toLowerCase();
+  const results = allArticles.filter((a) => {
+    if (a.category !== catId) return false;
+    const title = (a.title[lang] || a.title.th || '').toLowerCase();
+    const desc = (a.description[lang] || a.description.th || '').toLowerCase();
+    const tags = (a.tags || []).join(' ').toLowerCase();
+    return title.includes(q) || desc.includes(q) || tags.includes(q);
+  });
+
+  if (results.length > 0) {
+    if (aiArea) { aiArea.style.display = 'none'; aiArea.innerHTML = ''; }
+    if (articlesEl) {
+      articlesEl.style.display = '';
+      articlesEl.innerHTML = results.map((a) => `
+        <div class="dp-article-item" data-nav="article" data-cat="${a.category}" data-article="${a.id}">
+          <span class="dp-article-icon">${a.icon}</span>
+          <div class="dp-article-info">
+            <div class="dp-article-title">${getArticleText(a.title)}</div>
+            <div class="dp-article-desc">${getArticleText(a.description)}</div>
+          </div>
+          <span class="dp-article-arrow">›</span>
+        </div>
+      `).join('');
+      articlesEl.querySelectorAll('[data-nav="article"]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const art = allArticles.find((a) => a.id === el.dataset.article);
+          if (art) { closeDevicePanel(); navigate('article', art.category, art.id); }
+        });
+      });
+    }
+    return;
+  }
+
+  // No results — trigger AI escalation inside panel
+  if (devicePanelSearchRunning) return;
+  if (articlesEl) articlesEl.style.display = 'none';
+  if (aiArea) {
+    aiArea.style.display = '';
+    aiArea.innerHTML = `
+      <div class="dp-ai-header">
+        <span>🔍</span>
+        <div>
+          <div class="dp-ai-title">${isth ? 'ไม่พบบทความ' : 'No article found'}</div>
+          <div class="dp-ai-sub">"${query}"</div>
+        </div>
+      </div>
+      <div id="dp-escalating">
+        <div class="search-ai-step active" id="dp-step-llama">
+          <span>🤖</span>
+          <span>${isth ? 'น้องไอที กำลังค้นหา...' : 'น้องไอที checking...'}</span>
+          <div class="search-typing-dots"><span></span><span></span><span></span></div>
+        </div>
+      </div>
+    `;
+  }
+
+  devicePanelSearchTimer = setTimeout(() => runDevicePanelAI(query, catId, isth), 800);
+}
+
+async function runDevicePanelAI(query, catId, isth) {
+  if (devicePanelSearchRunning) return;
+  devicePanelSearchRunning = true;
+
+  const escEl = document.getElementById('dp-escalating');
+
+  try {
+    const catContext = buildArticleContext(); // full context but Llama knows the category from query
+
+    const chatRes = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: `[${catId.toUpperCase()}] ${query}` }],
+        articleContext: catContext,
+      }),
+    });
+    const chatData = await chatRes.json();
+    const llamaStep = document.getElementById('dp-step-llama');
+
+    if (chatData.reply && !chatData.needsSolve) {
+      if (llamaStep) llamaStep.classList.remove('active');
+      if (escEl) escEl.innerHTML += `
+        <div class="search-ai-answer">
+          <div class="search-ai-answer-header">🤖 น้องไอที</div>
+          <div class="search-ai-answer-text">${formatSearchText(chatData.reply)}</div>
+        </div>`;
+      devicePanelSearchRunning = false;
+      return;
+    }
+
+    if (llamaStep) {
+      llamaStep.innerHTML = `<span>🤖</span><span>${isth ? 'ส่งให้ช่างผู้เชี่ยวชาญ...' : 'Sent to technician...'}</span><span class="step-done">✓</span>`;
+      llamaStep.classList.remove('active');
+    }
+    if (escEl) escEl.innerHTML += `
+      <div class="search-ai-step active" id="dp-step-nem">
+        <span>🧠</span>
+        <span>${isth ? 'Nemotron วิเคราะห์...' : 'Nemotron analyzing...'}</span>
+        <div class="search-typing-dots"><span></span><span></span><span></span></div>
+      </div>`;
+
+    const solveRes = await fetch('/api/solve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problem: `[${catId}] ${query}`, context: [] }),
+    });
+    const solveData = await solveRes.json();
+
+    const nemStep = document.getElementById('dp-step-nem');
+    if (nemStep) {
+      nemStep.innerHTML = `<span>🧠</span><span>Nemotron Ultra</span><span class="step-done">✓</span>`;
+      nemStep.classList.remove('active');
+    }
+
+    if (solveData.solution && escEl) {
+      escEl.innerHTML += `
+        <div class="search-nemotron-card">
+          <div class="search-nemotron-header">
+            <span>🧠</span>
+            <span class="search-nemotron-title">Nemotron Ultra</span>
+            <span class="nemotron-badge">${isth ? 'เชี่ยวชาญ' : 'Expert'}</span>
+          </div>
+          <div class="search-nemotron-body">${formatSearchText(solveData.solution)}</div>
+        </div>`;
+    }
+
+    if (solveData.article) {
+      fetch('/api/save-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ article: solveData.article }),
+      }).then(() => {
+        if (!solvedArticles.find((a) => a.id === solveData.article.id)) {
+          solvedArticles.push(solveData.article);
+        }
+        if (escEl) escEl.innerHTML += `<div class="search-saved-badge">💾 ${isth ? `บทความใหม่บันทึกแล้ว: "${solveData.article.title?.th}"` : `Saved: "${solveData.article.title?.en}"`}</div>`;
+      });
+    }
+  } catch (err) {
+    console.error('Device panel AI error:', err);
+  } finally {
+    devicePanelSearchRunning = false;
+  }
+}
+
 // ---- Event Binding ----
 function bindEvents() {
-  // Navigation links
+  // Navigation links (data-nav)
   document.querySelectorAll('[data-nav]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.preventDefault();
@@ -847,9 +1121,20 @@ function bindEvents() {
       else if (nav === 'category') navigate('category', cat);
       else if (nav === 'article') navigate('article', cat || currentCategory, articleId);
       else if (nav === 'privacy') navigate('privacy');
-      else if (nav === 'chat') navigate('chat');
 
       // Close mobile menu
+      const links = document.getElementById('nav-links');
+      const toggle = document.getElementById('mobile-menu-toggle');
+      if (links) links.classList.remove('open');
+      if (toggle) toggle.classList.remove('open');
+    });
+  });
+
+  // Device nav buttons → open panel drawer
+  document.querySelectorAll('[data-device]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      openDevicePanel(el.dataset.device);
       const links = document.getElementById('nav-links');
       const toggle = document.getElementById('mobile-menu-toggle');
       if (links) links.classList.remove('open');
@@ -875,11 +1160,12 @@ function bindEvents() {
     });
   }
 
-  // Scam alert banner
+  // Scam alert banner → open scams panel
   const scamBanner = document.getElementById('scam-alert-banner');
   if (scamBanner) {
-    scamBanner.addEventListener('click', () => navigate('category', 'scams'));
+    scamBanner.addEventListener('click', () => openDevicePanel('scams'));
   }
+
 
   // Theme toggle
   const themeBtn = document.getElementById('theme-toggle');

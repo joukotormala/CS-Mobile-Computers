@@ -3,6 +3,7 @@
 // ========================================
 
 import { t, getLang, setLang, getArticleText } from './i18n.js';
+import { initChat } from './chat.js';
 
 // Will be loaded once articles.js is ready
 let articles = [];
@@ -39,6 +40,7 @@ export async function initApp() {
   setupCookieConsent();
   render();
   setupScrollAnimations();
+  initChat();
 
   // Handle browser back/forward
   window.addEventListener('popstate', (e) => {
@@ -74,6 +76,7 @@ function toggleLang() {
   const next = getLang() === 'th' ? 'en' : 'th';
   setLang(next);
   render();
+  initChat(); // Re-init chat so quick replies update language
 }
 
 // ---- Cookie Consent ----

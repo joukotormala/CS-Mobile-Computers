@@ -123,57 +123,217 @@ function navigate(page, category = null, articleId = null) {
 }
 
 // ---- Search ----
+// Search debounce timer
+let searchAITimer = null;
+let searchAIRunning = false;
+
 function handleSearch(query) {
   const resultsEl = document.getElementById('search-results');
   if (!resultsEl) return;
 
   if (!query || query.length < 2) {
-    resultsEl.classList.remove('active');
+    resultsEl.classList.remove('active', 'ai-mode');
+    clearTimeout(searchAITimer);
     return;
   }
 
   const lang = getLang();
+  const isth = lang === 'th';
   const q = query.toLowerCase();
-  const results = articles.filter((a) => {
+
+  // Search base articles + solved articles
+  const allArticles = [...articles, ...solvedArticles];
+  const results = allArticles.filter((a) => {
     const title = (a.title[lang] || a.title.th || '').toLowerCase();
     const desc = (a.description[lang] || a.description.th || '').toLowerCase();
     const tags = (a.tags || []).join(' ').toLowerCase();
     return title.includes(q) || desc.includes(q) || tags.includes(q);
   }).slice(0, 8);
 
-  if (results.length === 0) {
-    resultsEl.innerHTML = `
-      <div style="padding: var(--space-lg); text-align: center; color: var(--text-muted);">
-        ${t('search_no_results')}<br><small>${t('search_try_again')}</small>
-      </div>`;
+  // ── Articles found → show as normal results
+  if (results.length > 0) {
+    resultsEl.classList.remove('ai-mode');
+    resultsEl.innerHTML = results.map((a) => `
+      <div class="search-result-item" data-article="${a.id}">
+        <span class="result-icon">${a.icon}</span>
+        <div class="result-info">
+          <div class="result-title">${getArticleText(a.title)}</div>
+          <div class="result-category">${getCategoryLabel(a.category)}</div>
+        </div>
+      </div>
+    `).join('');
+    resultsEl.querySelectorAll('.search-result-item').forEach((el) => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.article;
+        const article = allArticles.find((a) => a.id === id);
+        if (article) {
+          navigate('article', article.category, article.id);
+          resultsEl.classList.remove('active', 'ai-mode');
+          const inp = document.getElementById('search-input');
+          if (inp) inp.value = '';
+        }
+      });
+    });
     resultsEl.classList.add('active');
     return;
   }
 
-  resultsEl.innerHTML = results.map((a) => `
-    <div class="search-result-item" data-article="${a.id}">
-      <span class="result-icon">${a.icon}</span>
-      <div class="result-info">
-        <div class="result-title">${getArticleText(a.title)}</div>
-        <div class="result-category">${getCategoryLabel(a.category)}</div>
+  // ── No articles found → trigger AI escalation flow
+  if (searchAIRunning) return; // prevent double-fire
+  clearTimeout(searchAITimer);
+
+  // Show initial "sending to technician" state
+  resultsEl.classList.add('active', 'ai-mode');
+  resultsEl.innerHTML = `
+    <div class="search-ai-header">
+      <span class="search-ai-icon">🔍</span>
+      <div>
+        <div class="search-ai-title">${isth ? 'ไม่พบบทความในฐานข้อมูล' : 'No article found in knowledge base'}</div>
+        <div class="search-ai-sub">${isth ? `สำหรับ: "${query}"` : `For: "${query}"`}</div>
       </div>
     </div>
-  `).join('');
+    <div class="search-ai-escalating" id="search-escalating">
+      <div class="search-ai-step active" id="step-llama">
+        <span>🤖</span>
+        <span>${isth ? 'น้องไอที กำลังค้นหาคำตอบ...' : 'น้องไอที is checking...'}</span>
+        <div class="search-typing-dots"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+  `;
 
-  resultsEl.querySelectorAll('.search-result-item').forEach((el) => {
-    el.addEventListener('click', () => {
-      const id = el.dataset.article;
-      const article = articles.find((a) => a.id === id);
-      if (article) {
-        navigate('article', article.category, article.id);
-        resultsEl.classList.remove('active');
-        const searchInput = document.getElementById('search-input');
-        if (searchInput) searchInput.value = '';
-      }
+  // Debounce — wait 800ms so user stops typing
+  searchAITimer = setTimeout(() => runSearchAI(query, resultsEl, isth), 800);
+}
+
+async function runSearchAI(query, resultsEl, isth) {
+  if (searchAIRunning) return;
+  searchAIRunning = true;
+
+  try {
+    // ── Phase 1: Llama checks with article context ──────────
+    const chatRes = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: query }],
+        articleContext: buildArticleContext(),
+      }),
     });
-  });
+    const chatData = await chatRes.json();
 
-  resultsEl.classList.add('active');
+    const llamaStep = document.getElementById('step-llama');
+
+    // Llama found an answer from articles
+    if (chatData.reply && !chatData.needsSolve) {
+      if (llamaStep) llamaStep.classList.remove('active');
+      const escEl = document.getElementById('search-escalating');
+      if (escEl) {
+        escEl.innerHTML += `
+          <div class="search-ai-answer">
+            <div class="search-ai-answer-header">🤖 น้องไอที</div>
+            <div class="search-ai-answer-text">${formatSearchText(chatData.reply)}</div>
+          </div>
+        `;
+      }
+      searchAIRunning = false;
+      return;
+    }
+
+    // ── Phase 2: Llama escalates → Nemotron solves ─────────
+    if (llamaStep) {
+      llamaStep.innerHTML = `
+        <span>🤖</span>
+        <span>${isth ? 'น้องไอที: ส่งปัญหาให้ช่างผู้เชี่ยวชาญแล้ว...' : 'น้องไอที: Sending to our technician...'}</span>
+        <span class="step-done">✓</span>
+      `;
+      llamaStep.classList.remove('active');
+    }
+
+    const escEl = document.getElementById('search-escalating');
+    if (escEl) {
+      escEl.innerHTML += `
+        <div class="search-ai-step active" id="step-nemotron">
+          <span>🧠</span>
+          <span>${isth ? 'Nemotron Ultra กำลังวิเคราะห์เชิงลึก...' : 'Nemotron Ultra analyzing deeply...'}</span>
+          <div class="search-typing-dots"><span></span><span></span><span></span></div>
+        </div>
+      `;
+    }
+
+    // Call Nemotron
+    const solveRes = await fetch('/api/solve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problem: query, context: [] }),
+    });
+    const solveData = await solveRes.json();
+
+    // Remove Nemotron typing
+    const nemStep = document.getElementById('step-nemotron');
+    if (nemStep) {
+      nemStep.innerHTML = `
+        <span>🧠</span>
+        <span>Nemotron Ultra</span>
+        <span class="step-done">✓</span>
+      `;
+      nemStep.classList.remove('active');
+    }
+
+    // ── Phase 3: Show solution ──────────────────────────────
+    if (solveData.solution && escEl) {
+      escEl.innerHTML += `
+        <div class="search-nemotron-card">
+          <div class="search-nemotron-header">
+            <span>🧠</span>
+            <span class="search-nemotron-title">Nemotron Ultra — ${isth ? 'วิเคราะห์เชิงลึก' : 'Deep Analysis'}</span>
+            <span class="nemotron-badge">${isth ? 'เชี่ยวชาญ' : 'Expert'}</span>
+          </div>
+          <div class="search-nemotron-body">${formatSearchText(solveData.solution)}</div>
+        </div>
+      `;
+    }
+
+    // ── Phase 4: Save new article ───────────────────────────
+    if (solveData.article) {
+      fetch('/api/save-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ article: solveData.article }),
+      }).then(() => {
+        if (!solvedArticles.find((a) => a.id === solveData.article.id)) {
+          solvedArticles.push(solveData.article);
+        }
+        if (escEl) {
+          escEl.innerHTML += `
+            <div class="search-saved-badge">
+              💾 ${isth
+                ? `บทความใหม่ถูกบันทึก: "${solveData.article.title?.th || ''}"`
+                : `New article saved: "${solveData.article.title?.en || ''}"`}
+            </div>
+          `;
+        }
+      });
+    }
+
+  } catch (err) {
+    console.error('Search AI error:', err);
+    const escEl = document.getElementById('search-escalating');
+    if (escEl) {
+      escEl.innerHTML += `<div style="padding: var(--space-md); color: var(--text-muted); font-size: var(--text-sm);">${isth ? 'เกิดข้อผิดพลาด กรุณาลองใหม่' : 'Error, please try again'}</div>`;
+    }
+  } finally {
+    searchAIRunning = false;
+  }
+}
+
+function formatSearchText(text) {
+  return String(text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^(\d+)\.\s(.+)$/gm, '<div class="s-list-item"><span class="s-num">$1.</span><span>$2</span></div>')
+    .replace(/^[-•]\s(.+)$/gm, '<div class="s-list-item"><span class="s-num">•</span><span>$1</span></div>')
+    .replace(/\n\n/g, '<br><br>')
+    .replace(/\n/g, '<br>');
 }
 
 function getCategoryLabel(catId) {
@@ -224,7 +384,6 @@ function renderNav() {
           <li><button class="nav-link ${currentCategory === 'mac' ? 'active' : ''}" data-nav="category" data-cat="mac">💻 ${t('nav_mac')}</button></li>
           <li><button class="nav-link ${currentCategory === 'windows' ? 'active' : ''}" data-nav="category" data-cat="windows">🖥️ ${t('nav_windows')}</button></li>
           <li><button class="nav-link scam-link ${currentCategory === 'scams' ? 'active' : ''}" data-nav="category" data-cat="scams">${t('nav_scams')}</button></li>
-          <li><button class="nav-link chat-nav-link ${currentPage === 'chat' ? 'active' : ''}" data-nav="chat">💬 ${getLang() === 'th' ? 'ถามน้องไอที' : 'Ask AI'}</button></li>
         </ul>
 
         <div class="nav-controls">
@@ -250,8 +409,6 @@ function renderPage() {
       return renderArticlePage();
     case 'privacy':
       return renderPrivacyPage();
-    case 'chat':
-      return renderChatPage();
     default:
       return renderHomePage();
   }
